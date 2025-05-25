@@ -845,6 +845,8 @@ def getAllShadePoints():
             x = data['left'][i] + data['width'][i] // 2
             y = data['top'][i] + data['height'][i] // 2
             found["Add shade group"] = (x, y)
+            x, y = shadeTargets["Add shade group"]
+
     for i in range(len(data['text'])):
         word = data['text'][i].strip()
         if not word:
@@ -861,31 +863,23 @@ def getAllShadePoints():
         if label in found:
             shadeTargets[label] = found[label]
 
-    print("found: ", found)
-
 def insertShades():
     '''inserting the repeaters into the equipments page'''
-    # time.sleep(1)
-    # x, y = keypadTargets["controls"]
-    # print("controls X and Y ", x, " ", y)
-    # pyautogui.moveTo(x, y)
-    # time.sleep(.1)
-    # pyautogui.press("down")
-    # time.sleep(.1)
-    # pyautogui.press("enter")
-    # time.sleep(.5)
+    time.sleep(1)
+    x, y = keypadTargets["controls"]
+    print("controls X and Y ", x, " ", y)
+    pyautogui.moveTo(x, y)
+    time.sleep(.1)
+    pyautogui.press("down")
+    time.sleep(.1)
+    pyautogui.press("enter")
+    time.sleep(.5)
     getAllShadePoints()
     x, y = shadeTargets["Place:"]
     print("Place X and Y ", x, " ", y)
     pyautogui.moveTo(x, y)
     time.sleep(.2)
     pyautogui.click()
-    time.sleep(.2)
-    pyautogui.press("down")
-    time.sleep(.2)
-    pyautogui.press("down")
-    time.sleep(.2)
-    pyautogui.press("down")
     time.sleep(.2)
     pyautogui.press("down")
     time.sleep(.2)
@@ -897,6 +891,7 @@ def insertShades():
         pyautogui.hotkey('ctrl', 'a')
         time.sleep(0.1)
         pyautogui.hotkey('ctrl', 'v')  # Paste from clipboard
+        time.sleep(0.3)
         pyautogui.press("enter")
         time.sleep(0.3)
 
@@ -928,8 +923,6 @@ def insertShades():
             only_A_shades.append(shade_id)
         else:
             other_shades.append(shade_id)
-    print("Shade A ", only_A_shades)
-    print("Shade no A ", other_shades)
     for shade_id in sorted(only_A_shades):
         parts = shade_id.split("-")
         if len(parts) < 2 or not parts[1].isdigit():
@@ -938,9 +931,6 @@ def insertShades():
 
         room_number = int(parts[1])
 
-        print("room_number ", room_number)
-        print("current_room_number ", current_room_number)
-        print("shade ", shade_id)
         while room_number != current_room_number:
             x, y = shadeTargets["Next"]
             pyautogui.moveTo(x, y)
@@ -952,33 +942,27 @@ def insertShades():
             current_room_number = get_current_room_number()
             pyautogui.press('enter')
 
-
         x, y = shadeTargets["Add shade group"]
-        print("moving to add ", x, " ", y)
         pyautogui.moveTo(x, y)
-        for shades in other_shades:
+        time.sleep(.2)
+        pyautogui.click()
+        for shades in sorted(other_shades):
             cur_room = shades.split("-")
             if int(cur_room[1]) == room_number:
-                print("Adding shades ", shades)
                 time.sleep(.2)
                 pyautogui.click()
         time.sleep(1)
         getAllShadePoints()
         x, y = shadeTargets["Shade Group 1"]
         pyautogui.moveTo(x, y)
-        print("moving to first ", x, " ", y)
         time.sleep(.2)
         pyautogui.click()
         time.sleep(.2)
-        pyautogui.click()
-        time.sleep(.2)
-        for shades in other_shades:
+        enter_text(shade_id)
+        for shades in sorted(other_shades):
             cur_room = shades.split("-")
             if int(cur_room[1]) == room_number:
-                print("entering shades ", shades)
                 enter_text(shades)
-
-
 
 def gettingAllEquipmentPoints():
     '''getting equipment points'''
