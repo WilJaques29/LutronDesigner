@@ -31,6 +31,9 @@ keypadTargets = {
         "Place:": (0,0),
         "seeTouch": (0,0),
         "controls": (0, 0),
+        "Sensors": (0, 0),
+        "Ceiling Occ RF": (0,0),
+        "Wall Keypads": (0, 0),
         "Next": (0,0)
     }
 loadsTargets = {
@@ -326,6 +329,16 @@ def getAllKeypadPoints():
 
     found = {}
 
+    for i in range(len(data['text']) - 1):
+        w1, w2 = data['text'][i:i+2]
+        phrase = f"{w1.strip()} {w2.strip()}"
+        if phrase == "Wall Keypads":
+            x = data['left'][i] + data['width'][i] // 2
+            y = data['top'][i] + data['height'][i] // 2
+            pyautogui.moveTo(x, y)
+            time.sleep(1)
+            found["Wall Keypads"] = (x, y)
+
     for i in range(len(data['text'])):
         word = data['text'][i].strip()
         if not word:
@@ -335,12 +348,38 @@ def getAllKeypadPoints():
             if label in word:
                 x = data['left'][i] + data['width'][i] // 2
                 y = data['top'][i] + data['height'][i] // 2
-
                 if label == "seeTouch":
                     x -= 15
                     y -= 100
+                pyautogui.moveTo(x, y)
+                time.sleep(1)
 
                 found[label] = (x, y)
+
+    if found["Sensors"] != (0,0):
+        x, y = found["Sensors"]
+        print("Sensors X and Y ", x, " ", y)
+        pyautogui.moveTo(x, y)
+        time.sleep(.1)
+        pyautogui.click()
+        time.sleep(.1)
+
+        print("Capturing screen...")
+        screenshot = ImageGrab.grab()
+        print("Running OCR...")
+        data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+
+        for i in range(len(data['text']) - 2):
+            w1, w2, w3 = data['text'][i:i+3]
+            phrase = f"{w1.strip()} {w2.strip()} {w3.strip()}"
+            if phrase == "Ceiling Occ RF":
+                x = data['left'][i] + data['width'][i] // 2
+                y = data['top'][i] + data['height'][i] // 2
+                x -= 15
+                y -= 105
+                found["Ceiling Occ RF"] = (x, y)
+                pyautogui.moveTo(x, y)
+                time.sleep(1)
 
     # Update keypadTargets with found coordinates
     for label in keypadTargets:
@@ -418,8 +457,6 @@ def insert_keypads():
             print(f"Room {room_number} not found in room_data. Skipping {device_id}.")
             continue
 
-
-
         # Click on the keypad field (must already be in keypadTargets)
         if keypadTargets["seeTouch"] == (0,0):
             print("Error: 'keypad' target not defined in keypadTargets.")
@@ -446,19 +483,43 @@ def insert_keypads():
                 current_room_number = get_current_room_number()
                 pyautogui.press("enter")
 
-         # Insert keypad
-        x, y = keypadTargets["seeTouch"]
-        print(f"Inserting keypad '{keypad_name}' for Room {room_number} ({device_id})")
-        # print("seeTocuh X and Y ", x, " ", y)
-        pyautogui.moveTo(x, y)
-        pyautogui.click()
-        time.sleep(1)
+        # Insert keypad
+        if parts[0] == "K":
+            x, y = keypadTargets["Wall Keypads"]
+            pyautogui.moveTo(x, y)
+            pyautogui.click()
+            time.sleep(.3)
+            x, y = keypadTargets["seeTouch"]
+            print(f"Inserting '{device_id}' in Room {room_number}")
+            x += 35
+            pyautogui.moveTo(x, y)
+            pyautogui.click()
+            time.sleep(.3)
+            x -= 35
+            pyautogui.moveTo(x, y)
+            pyautogui.click()
+            time.sleep(.3)
+            # print("Inserting keypad:", keypad_name)
+            enter_text(keypad_name)
+            time.sleep(0.5)
+            pyautogui.press('tab')
+            time.sleep(0.5)
+        elif parts[0] == "MS" or parts[0] == "OS":
+            x, y = keypadTargets["Sensors"]
+            pyautogui.moveTo(x, y)
+            pyautogui.click()
+            time.sleep(.3)
+            x, y = keypadTargets["Ceiling Occ RF"]
+            print(f"Inserting '{device_id}' in Room {room_number}")
+            x += 35
+            pyautogui.moveTo(x, y)
+            pyautogui.click()
+            time.sleep(.3)
+            x -= 35
+            pyautogui.moveTo(x, y)
+            pyautogui.click()
+            time.sleep(.3)
 
-        # print("Inserting keypad:", keypad_name)
-        enter_text(keypad_name)
-        time.sleep(0.5)
-        pyautogui.press('tab')
-        time.sleep(0.5)
         # print("inserting device ", device_id)
         enter_text(device_id)
         pyautogui.press('enter')
@@ -573,10 +634,6 @@ def loadChecker():
         name_count = {}
         for zone, data in loads:
             name = data["zone_name"]
-            is_ketra = data["Ketra"]
-
-            if is_ketra:
-                continue  # Skip Ketra loads
 
             if name not in name_count:
                 name_count[name] = 1
@@ -1264,14 +1321,14 @@ def prompt_file_selection():
 if __name__ == "__main__":
     # Example usage
     ketraLights = ["AK", "AL"]
-    print("Select the original xls")
-    input()
-    file_path = prompt_file_selection()
-    if file_path:
-        print("Selected file:", file_path)
-    else:
-        print("No file selected.")
-    file_path = prompt_file_selection()
+    # print("Select the original xls")
+    # input()
+    # file_path = prompt_file_selection()
+    # if file_path:
+    #     print("Selected file:", file_path)
+    # else:
+    #     print("No file selected.")
+    # file_path = prompt_file_selection()
 
     load_excel_file(file_path, ketraLights)
 
@@ -1281,14 +1338,14 @@ if __name__ == "__main__":
     if choice == '1':
         '''This is for creating a new program'''
         time.sleep(2)
-        # getAllKeypadPoints()
+        getAllKeypadPoints()
         # insert_rooms()
         # getRoomLocations()
         # keypadChecker()
         # insert_keypads()
         # loadChecker()
-        getAllLoadPoints()
-        insertLoads()
+        # getAllLoadPoints()
+        # insertLoads()
         # insertShades()
         # gettingAllEquipmentPoints()
         # insertEquipment()
