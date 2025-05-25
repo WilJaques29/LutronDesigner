@@ -28,12 +28,13 @@ equipment_data = {}
 shade_data = []
 fixture_data = {}
 keypadTargets = {
-        "Place": (0,0),
+        "Place:": (0,0),
         "seeTouch": (0,0),
         "controls": (0, 0),
         "Next": (0,0)
     }
 loadsTargets = {
+    "Place:": (0,0),
     "Add": (0,0),
     "Edit Fixture Type": (0,0),
     "Next": (0,0),
@@ -249,94 +250,6 @@ def load_excel_file(file_path, ketraLights):
         elif parts[0] == "D":
             device_data[device_id] = keypad_name
 
-def goToRoom(room_number):
-    # Get the room name from the dictionary
-    room_name = room_data.get(room_number, None)
-    if room_name:
-        print(f"Going to room: {room_name}")
-        # Simulate clicking on the room (you can replace this with actual click logic)
-        x,y = room_data[room_number]["location"]
-        pyautogui.moveTo(x,y)
-        pyautogui.click()
-        time.sleep(1)  # Wait for a second
-    else:
-        print(f"Room number {room_number} not found.")
-
-def getAllKeypadPoints():
-    '''getting all points from lutron'''
-    print("Capturing screen...")
-    screenshot = ImageGrab.grab()
-    print("Running OCR...")
-    data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
-
-    found = {}
-
-    for i in range(len(data['text'])):
-        word = data['text'][i].strip()
-        if not word:
-            continue
-
-        for label in keypadTargets.keys():
-            if label in word:
-                x = data['left'][i] + data['width'][i] // 2
-                y = data['top'][i] + data['height'][i] // 2
-
-                if label == "seeTouch":
-                    x -= 15
-                    y -= 100
-
-                found[label] = (x, y)
-
-    # Update keypadTargets with found coordinates
-    for label in keypadTargets:
-        if label in found:
-            keypadTargets[label] = found[label]
-
-    print("found: ", found)
-
-def getAllLoadPoints():
-    '''getting all points from lutron'''
-    x, y = keypadTargets["controls"]
-    print("controls X and Y ", x, " ", y)
-    pyautogui.moveTo(x, y)
-    time.sleep(.1)
-    pyautogui.press("down")
-    time.sleep(.1)
-    pyautogui.press("enter")
-    time.sleep(.5)
-
-    print("Capturing screen...")
-    screenshot = ImageGrab.grab()
-    print("Running OCR...")
-    data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
-    # print(data)
-    found = {}
-
-    for i in range(len(data['text']) - 2):
-        w1, w2, w3 = data['text'][i:i+3]
-        phrase = f"{w1.strip()} {w2.strip()} {w3.strip()}"
-        if phrase == "Edit Fixture Types":
-            x = data['left'][i] + data['width'][i] // 2
-            y = data['top'][i] + data['height'][i] // 2
-            found["Edit Fixture Type"] = (x, y)
-    # Second pass for single-word labels
-    for i in range(len(data['text'])):
-        word = data['text'][i].strip()
-        if not word:
-            continue
-        for label in loadsTargets.keys():
-            if label == word:
-                x = data['left'][i] + data['width'][i] // 2
-                y = data['top'][i] + data['height'][i] // 2
-                found[label] = (x, y)
-
-    # Update loadsTargets
-    for label in loadsTargets:
-        if label in found:
-            loadsTargets[label] = found[label]
-
-    print("found: ", found)
-
 def insert_rooms():
     '''inserting rooms into lutron'''
 
@@ -390,6 +303,51 @@ def insert_rooms():
             time.sleep(0.5)
 
     print("Room insertion complete.")
+
+def goToRoom(room_number):
+    # Get the room name from the dictionary
+    room_name = room_data.get(room_number, None)
+    if room_name:
+        print(f"Going to room: {room_name}")
+        # Simulate clicking on the room (you can replace this with actual click logic)
+        x,y = room_data[room_number]["location"]
+        pyautogui.moveTo(x,y)
+        pyautogui.click()
+        time.sleep(1)  # Wait for a second
+    else:
+        print(f"Room number {room_number} not found.")
+
+def getAllKeypadPoints():
+    '''getting all points from lutron'''
+    print("Capturing screen...")
+    screenshot = ImageGrab.grab()
+    print("Running OCR...")
+    data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+
+    found = {}
+
+    for i in range(len(data['text'])):
+        word = data['text'][i].strip()
+        if not word:
+            continue
+
+        for label in keypadTargets.keys():
+            if label in word:
+                x = data['left'][i] + data['width'][i] // 2
+                y = data['top'][i] + data['height'][i] // 2
+
+                if label == "seeTouch":
+                    x -= 15
+                    y -= 100
+
+                found[label] = (x, y)
+
+    # Update keypadTargets with found coordinates
+    for label in keypadTargets:
+        if label in found:
+            keypadTargets[label] = found[label]
+
+    print("found: ", found)
 
 def searchForRoom(room_number):
     '''Check if given room number is visible on screen using OCR'''
@@ -564,6 +522,40 @@ def extract_room_number(zone):
     match = re.match(r'^(\d+)', zone)
     return int(match.group(1)) if match else None
 
+def getAllLoadPoints():
+    '''getting all points from lutron'''
+    # x, y = keypadTargets["controls"]
+    # print("controls X and Y ", x, " ", y)
+    # pyautogui.moveTo(x, y)
+    # time.sleep(.1)
+    # pyautogui.press("down")
+    # time.sleep(.1)
+    # pyautogui.press("enter")
+    # time.sleep(.5)
+
+    print("Capturing screen...")
+    screenshot = ImageGrab.grab()
+    print("Running OCR...")
+    data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+    # print(data)
+    found = {}
+    for i in range(len(data['text'])):
+        word = data['text'][i].strip()
+        if not word:
+            continue
+        for label in loadsTargets.keys():
+            if label == word:
+                x = data['left'][i] + data['width'][i] // 2
+                y = data['top'][i] + data['height'][i] // 2
+                found[label] = (x, y)
+
+    # Update loadsTargets
+    for label in loadsTargets:
+        if label in found:
+            loadsTargets[label] = found[label]
+
+    print("found: ", found)
+
 def loadChecker():
     '''Checks to ensure that there are no duplicate zone names in same room'''
     room_loads = {}
@@ -599,7 +591,7 @@ def insertLoads():
     time1 = .2
     time2 = .5
     # clicking the place
-    x, y = keypadTargets["Place"]
+    x, y = loadsTargets["Place:"]
     print("Place X and Y ", x, " ", y)
     pyautogui.moveTo(x, y)
     time.sleep(time1)
@@ -608,6 +600,23 @@ def insertLoads():
     pyautogui.press("down")
     time.sleep(time1)
 
+    def findingKetra(loadNum):
+        print("Capturing screen...")
+        screenshot = ImageGrab.grab()
+        print("Running OCR...")
+        data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+        # print(data)
+        found = {}
+
+        for i in range(len(data['text'])):
+            word = data['text'][i].strip()
+            if not word:
+                continue
+            if loadNum == word:
+                x = data['left'][i] + data['width'][i] // 2
+                y = data['top'][i] + data['height'][i] // 2
+                break
+        return x,y
 
     def enter_text(text):
         pyperclip.copy(text)  # Copy to clipboard
@@ -669,6 +678,8 @@ def insertLoads():
             time.sleep(time1)
             current_room_number = get_current_room_number()
             pyautogui.press('enter')
+        elif room_number == 102:
+            exit(1)
 
         print(f"Inserting light '{zone_data[load_num]}' for Room {room_number} ({load_num})")
         while room_number != current_room_number:
@@ -695,6 +706,70 @@ def insertLoads():
         if zone_data[load_num]["Ketra"]:
             '''if light is ketra'''
             print("Ketra Light")
+            pyautogui.press("left")
+            enter_text(zone_data[load_num]["zone_name"])
+            pyautogui.press("right")
+            time.sleep(.2)
+            pyautogui.press("right")
+            time.sleep(.2)
+            loadTag = load_num + "-1"
+            enter_text(loadTag)
+            pyautogui.press("left")
+            time.sleep(.2)
+            pyautogui.press("left")
+            time.sleep(.2)
+            pyautogui.press("left")
+            time.sleep(.2)
+            enterFixture(zone_data[load_num]["fixtures"][0]["fixture"])
+            time.sleep(.2)
+            pyautogui.press("enter")
+            time.sleep(.2)
+            #getting ketra loadNum
+            x,y = findingKetra(loadTag)
+            pyautogui.moveTo(x, y)
+            pyautogui.click()
+            time.sleep(.2)
+            pyautogui.press("left")
+            time.sleep(.2)
+            pyautogui.press("left")
+            time.sleep(.2)
+            pyautogui.press("left")
+            time.sleep(.2)
+            pyautogui.press("enter")
+            time.sleep(.2)
+            # This is where I am and I need to enter the rest of the ketra fixtures here
+            print("Number of lights ", zone_data[load_num]["fixtures"])
+            for fixture_entry in zone_data[load_num]["fixtures"]:
+                fixture = fixture_entry["fixture"]
+                count = fixture_entry["count"]
+                print("Fixture ", fixture)
+                print("count ", count)
+                intial = 1
+                if fixture_entry == zone_data[load_num]["fixtures"][0]:
+                    print("skip first")
+                    intial = 2
+                print(f"entering from {intial} -> {count}")
+                for numOfEachFixtures in range(intial,count+1):
+                    enter_text(zone_data[load_num]["zone_name"])
+                    time.sleep(.5)
+                    enterFixture(fixture)
+                    time.sleep(.2)
+                    pyautogui.press("right")
+                    time.sleep(.2)
+                    loadTag = load_num + "-" + str(numOfEachFixtures)
+                    enter_text(loadTag)
+                    time.sleep(.2)
+                    pyautogui.press("left")
+                    time.sleep(.2)
+                    pyautogui.press("left")
+                    time.sleep(.2)
+                    pyautogui.press("left")
+                    time.sleep(.2)
+                    pyautogui.press("left")
+                    time.sleep(.2)
+                    pyautogui.press("enter")
+                    time.sleep(.2)
+
 
         else:
             pyautogui.press("left")
@@ -702,7 +777,7 @@ def insertLoads():
             enterFixture(zone_data[load_num]["fixtures"][0]["fixture"])
             enter_text(zone_data[load_num]["fixtures"][0]["count"])
             enter_text(load_num)
-            if zone_data[load_num]["fixtures"][0]["fixture"] != "EH":
+            if zone_data[load_num]["fixtures"][0]["fixture"] != "EH" or zone_data[load_num]["fixtures"][0]["fixture"] != "Fan":
                 time.sleep(time1)
                 pyautogui.write("y")
                 pyautogui.press("enter")
@@ -1180,11 +1255,24 @@ def insertEquipment():
 
     print("All equipment inserted.")
 
-
+def prompt_file_selection():
+    root = tk.Tk()
+    root.withdraw()  # Hide the main window
+    file_path = filedialog.askopenfilename(title="Select a file", filetypes=[("Excel Files", "*.xlsx *.xls")])
+    return file_path
 
 if __name__ == "__main__":
     # Example usage
-    ketraLights = ["AK"]
+    ketraLights = ["AK", "AL"]
+    print("Select the original xls")
+    input()
+    file_path = prompt_file_selection()
+    if file_path:
+        print("Selected file:", file_path)
+    else:
+        print("No file selected.")
+    file_path = prompt_file_selection()
+
     load_excel_file(file_path, ketraLights)
 
     print("Press '1' if you are creating program.")
@@ -1199,10 +1287,9 @@ if __name__ == "__main__":
         # keypadChecker()
         # insert_keypads()
         # loadChecker()
-        # getAllLoadPoints()
-        # insertFixtureTypes()
-        # insertLoads()
-        insertShades()
+        getAllLoadPoints()
+        insertLoads()
+        # insertShades()
         # gettingAllEquipmentPoints()
         # insertEquipment()
 
