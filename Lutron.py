@@ -1,6 +1,6 @@
 import sys
 import pytesseract
-from PIL import ImageGrab, Image
+from PIL import ImageGrab, Image, ImageEnhance, ImageOps
 import pyautogui
 import threading
 import csv
@@ -22,6 +22,7 @@ file_path = r"C:\Users\Wiltj\OneDrive - Maverick Lite\_Maverick Lite Client\_WSH
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\tesseract.exe"
 
 room_data = {}
+last_checked_room = None
 zone_data = {}
 device_data = {}
 equipment_data = {}
@@ -91,8 +92,6 @@ changed_repeaters = set()
 
 def checkingLoads(room_num):
     """Ensure all expected loads for the given room number are visible on screen."""
-    print(f"Checking loads for Room {room_num}")
-    print("Taking screenshot...")
     screenshot = ImageGrab.grab()
     text_data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
 
@@ -116,17 +115,16 @@ def checkingLoads(room_num):
 def findPreviousFloor(floor):
     '''finding previous floor'''
     # Take full screenshot
-    print("Taking screenshot...")
     screenshot = ImageGrab.grab()
     # Run OCR
+    floor_lower = floor.lower()
     text_data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
     # Loop through OCR results and look for "Mech (102)"
     for i in range(len(text_data['text'])):
         word = text_data['text'][i].strip()
         if not word:
             continue
-
-        if floor in word:
+        if floor_lower in word.lower():
             x = text_data['left'][i] + text_data['width'][i] // 2
             y = text_data['top'][i] + text_data['height'][i] // 2
             pyautogui.moveTo(x, y)
@@ -162,8 +160,8 @@ def load_excel_file(file_path, ketraLights):
                     print(f"Missing fixture for ZONE {zone} (ZONE_NAME: '{zone_name}').")
                     fixture_count = input("Enter fixture and count (e.g., AA,3 or AA,3 BB,2): ").strip()
             else:
-
                 shade_data.append(zone)
+                continue
             # Parse multiple fixture,count pairs
             entries = fixture_count.split()
             for entry in entries:
@@ -252,9 +250,58 @@ def load_excel_file(file_path, ketraLights):
             equipment_data[device_id] = keypad_name
         elif parts[0] == "D":
             device_data[device_id] = keypad_name
+        elif parts[0] == "MS":
+            device_data[device_id] = device_id
+        elif parts[0] == "OS":
+            device_data[device_id] = device_id
+
+        def get_room_number_from_id(identifier):
+            match = re.search(r'-([0-9]+)-', identifier)
+            return int(match.group(1)) if match else None
+
+        # Check device_data
+        for device_id in device_data:
+            room_number = get_room_number_from_id(device_id)
+            if room_number not in room_data:
+                print(f"❌ Invalid device: {device_id} (No room {room_number})")
+                sys.exit(1)
+
+        # Check equipment_data
+        for equip_id in equipment_data:
+            room_number = get_room_number_from_id(equip_id)
+            if room_number not in room_data:
+                print(f"❌ Invalid equipment: {equip_id} (No room {room_number})")
+                sys.exit(1)
+
+        # Check zone_data
+        for zone in zone_data:
+            match = re.match(r'^(\d+)', zone)
+            if match:
+                room_number = int(match.group(1))
+                if room_number not in room_data:
+                    print(f"❌ Invalid zone: {zone} (No room {room_number})")
+                    sys.exit(1)
 
 def insert_rooms():
     '''inserting rooms into lutron'''
+    x, y = keypadTargets["Place:"]
+    pyautogui.moveTo(x, y)
+    time.sleep(.1)
+    pyautogui.click()
+    if keypadTargets["Next"] == (0,0):
+        # got to find next
+        screenshot = ImageGrab.grab()
+        data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+        for i in range(len(data['text'])):
+            word = data['text'][i].strip()
+            if not word:
+                continue
+            if "Next" in word:
+                x = data['left'][i] + data['width'][i] // 2
+                y = data['top'][i] + data['height'][i] // 2
+                keypadTargets["Next"] = (x, y)
+    time.sleep(.1)
+    pyautogui.press('down')
 
     def enter_text(text):
         text = text.lower().title()
@@ -276,16 +323,16 @@ def insert_rooms():
     floor_names = {
         '1': 'First Floor',
         '2': 'Second Floor',
-        '3': 'Third Floor'
+        '3': 'Third Floor',
+        '6': "Exterior"
     }
 
     sorted_floors = sorted(floors.keys())
-    count = 0
+    county = 0
     print("floors: ", sorted_floors)
     for i, floor_key in enumerate(sorted_floors):
-        count += 1
+        county += 1
         floor_name = floor_names.get(floor_key, f"Floor {floor_key}")
-        print(f"Inserting {floor_name}")
         # Enter floor name
         enter_text(floor_name)
 
@@ -301,7 +348,7 @@ def insert_rooms():
                 pyautogui.hotkey('ctrl', 'insert')
             enter_text(full_name)
         if i < len(sorted_floors) -1:
-            findPreviousFloor(floor_name.split(" ")[0])
+            findPreviousFloor(floor_name.split(" ")[0].strip())
             pyautogui.hotkey('ctrl', 'insert')
             time.sleep(0.5)
 
@@ -309,24 +356,27 @@ def insert_rooms():
 
 def goToRoom(room_number):
     # Get the room name from the dictionary
-    room_name = room_data.get(room_number, None)
-    if room_name:
-        print(f"Going to room: {room_name}")
-        # Simulate clicking on the room (you can replace this with actual click logic)
-        x,y = room_data[room_number]["location"]
-        pyautogui.moveTo(x,y)
-        pyautogui.click()
-        time.sleep(1)  # Wait for a second
-    else:
-        print(f"Room number {room_number} not found.")
+
+    screenshot = ImageGrab.grab()
+
+    data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+
+    for i in range(len(data['text'])):
+        word = data['text'][i].strip()
+        if not word:
+            continue
+        if room_number in word:
+            x = data['left'][i] + data['width'][i] // 2
+            y = data['top'][i] + data['height'][i] // 2
+            pyautogui.moveTo(x, y)
+            time.sleep(.3)
+            pyautogui.click()
+            time.sleep(.3)
 
 def getAllKeypadPoints():
     '''getting all points from lutron'''
-    print("Capturing screen...")
     screenshot = ImageGrab.grab()
-    print("Running OCR...")
     data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
-
     found = {}
 
     for i in range(len(data['text']) - 1):
@@ -335,38 +385,46 @@ def getAllKeypadPoints():
         if phrase == "Wall Keypads":
             x = data['left'][i] + data['width'][i] // 2
             y = data['top'][i] + data['height'][i] // 2
-            pyautogui.moveTo(x, y)
-            time.sleep(1)
             found["Wall Keypads"] = (x, y)
 
     for i in range(len(data['text'])):
         word = data['text'][i].strip()
         if not word:
             continue
+        if "Sensors" in word:
+            x = data['left'][i] + data['width'][i] // 2
+            y = data['top'][i] + data['height'][i] // 2
+            found["Sensors"] = (x, y)
 
-        for label in keypadTargets.keys():
-            if label in word:
-                x = data['left'][i] + data['width'][i] // 2
-                y = data['top'][i] + data['height'][i] // 2
-                if label == "seeTouch":
-                    x -= 15
-                    y -= 100
-                pyautogui.moveTo(x, y)
-                time.sleep(1)
-
-                found[label] = (x, y)
-
-    if found["Sensors"] != (0,0):
-        x, y = found["Sensors"]
-        print("Sensors X and Y ", x, " ", y)
+    if found["Wall Keypads"] != (0,0):
+        x, y = found["Wall Keypads"]
         pyautogui.moveTo(x, y)
         time.sleep(.1)
         pyautogui.click()
-        time.sleep(.1)
-
-        print("Capturing screen...")
+        time.sleep(.3)
         screenshot = ImageGrab.grab()
-        print("Running OCR...")
+        data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+        for i in range(len(data['text'])):
+            word = data['text'][i].strip()
+            if not word:
+                continue
+
+            for label in keypadTargets.keys():
+                if label in word:
+                    x = data['left'][i] + data['width'][i] // 2
+                    y = data['top'][i] + data['height'][i] // 2
+                    if label == "seeTouch":
+                        x -= 15
+                        y -= 100
+                    found[label] = (x, y)
+
+    if found["Sensors"] != (0,0):
+        x, y = found["Sensors"]
+        pyautogui.moveTo(x, y)
+        time.sleep(.1)
+        pyautogui.click()
+        time.sleep(.3)
+        screenshot = ImageGrab.grab()
         data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
 
         for i in range(len(data['text']) - 2):
@@ -378,19 +436,14 @@ def getAllKeypadPoints():
                 x -= 15
                 y -= 105
                 found["Ceiling Occ RF"] = (x, y)
-                pyautogui.moveTo(x, y)
-                time.sleep(1)
 
     # Update keypadTargets with found coordinates
     for label in keypadTargets:
         if label in found:
             keypadTargets[label] = found[label]
 
-    print("found: ", found)
-
 def searchForRoom(room_number):
     '''Check if given room number is visible on screen using OCR'''
-    print(f"Searching for Room {room_number} on screen...")
 
     screenshot = ImageGrab.grab()
     data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
@@ -408,37 +461,70 @@ def searchForRoom(room_number):
 
 def insert_keypads():
     '''This is for entering all the keypads in'''
-    counter = 1
-    x, y = keypadTargets["Place"]
-    print("Place X and Y ", x, " ", y)
+    x, y = keypadTargets["Place:"]
+    pyautogui.moveTo(x, y)
+    time.sleep(.1)
+    pyautogui.click()
+    time.sleep(.3)
+    x, y = keypadTargets["Next"]
+    if x == 0 or y == 0:
+        # got to find next
+        screenshot = ImageGrab.grab()
+        data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+        for i in range(len(data['text'])):
+            word = data['text'][i].strip()
+            if not word:
+                continue
+            if "Next" in word:
+                x = data['left'][i] + data['width'][i] // 2
+                y = data['top'][i] + data['height'][i] // 2
+                keypadTargets["Next"] = (x, y)
     pyautogui.moveTo(x, y)
     time.sleep(.1)
     pyautogui.click()
     time.sleep(.1)
+    pyautogui.press('up')
+    time.sleep(0.1)
+
 
 
     def enter_text(text):
         pyperclip.copy(text)  # Copy to clipboard
+        time.sleep(0.1)
         pyautogui.hotkey('ctrl', 'v')  # Paste from clipboard
         time.sleep(0.3)
 
-    def get_current_room_number():
-        time.sleep(1)
+    def get_current_room_number(room_number = 0):
+        time.sleep(0.2)
         pyautogui.press('f2')
         time.sleep(0.2)
         pyautogui.hotkey('ctrl', 'a')
+        time.sleep(0.1)
         pyautogui.hotkey('ctrl', 'c')
         time.sleep(0.2)
         room_text = pyperclip.paste().strip()
+        global last_checked_room
+        if last_checked_room != room_number:
+            last_checked_room = room_number
+        else:
+            goToRoom(str(room_number))
+            return room_number
         if room_text:
             parts = room_text.split()
             if parts[-1].isdigit():
                 return int(parts[-1])
-        return None
+        print("Error Getting Room Number")
+        return -1
 
-    last_room_number = 100
+    def extract_room_number(key):
+        parts = key.split("-")
+        if len(parts) >= 2 and parts[1].isdigit():
+            return int(parts[1])
+        return float('inf')  # fallback so non-matching keys sort last
+    current_room_number = get_current_room_number()
+    pyautogui.press('enter')
 
-    for device_id in sorted(device_data.keys()):
+    for device_id in sorted(device_data.keys(), key = extract_room_number):
         keypad_name = device_data[device_id]
         # print("device ", device_id, "keypad ", keypad_name)
         parts = device_id.split("-")
@@ -462,26 +548,16 @@ def insert_keypads():
             print("Error: 'keypad' target not defined in keypadTargets.")
             continue
 
-        if room_number != last_room_number:
-            if not searchForRoom(room_number):
-                continue
-            x, y = keypadTargets["Place"]
-            # print("Place X and Y ", x, " ", y)
+        while current_room_number != room_number:
+            x, y = keypadTargets["Next"]
             pyautogui.moveTo(x, y)
-            time.sleep(.5)
+            time.sleep(.1)
             pyautogui.click()
             time.sleep(.1)
-            for i in range(0,counter):
-                    pyautogui.press("down")
-                    time.sleep(0.1)
-            counter +=1
-            time.sleep(.1)
-            current_room_number = get_current_room_number()
-            while current_room_number != room_number:
-                pyautogui.press("down")
-                time.sleep(0.1)
-                current_room_number = get_current_room_number()
-                pyautogui.press("enter")
+            pyautogui.press('up')
+            time.sleep(0.1)
+            current_room_number = get_current_room_number(room_number)
+            pyautogui.press("enter")
 
         # Insert keypad
         if parts[0] == "K":
@@ -490,7 +566,6 @@ def insert_keypads():
             pyautogui.click()
             time.sleep(.3)
             x, y = keypadTargets["seeTouch"]
-            print(f"Inserting '{device_id}' in Room {room_number}")
             x += 35
             pyautogui.moveTo(x, y)
             pyautogui.click()
@@ -510,7 +585,6 @@ def insert_keypads():
             pyautogui.click()
             time.sleep(.3)
             x, y = keypadTargets["Ceiling Occ RF"]
-            print(f"Inserting '{device_id}' in Room {room_number}")
             x += 35
             pyautogui.moveTo(x, y)
             pyautogui.click()
@@ -533,7 +607,6 @@ def getRoomLocations():
     '''getting room locations from lutron'''
 
     # # Take full screenshot
-    print("Taking screenshot...")
     screenshot = ImageGrab.grab()
     # Run OCR
     text_data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
@@ -573,7 +646,7 @@ def keypadChecker():
                 # Leave as-is
             else:
                 count = name_counts[name]
-                new_name = f"{name}_{count}"
+                new_name = f"{name} {count}"
                 print(f"Renaming duplicate in Room {room_number}: '{name}' → '{new_name}'")
                 device_data[device_id] = new_name
                 name_counts[name] += 1
@@ -585,20 +658,18 @@ def extract_room_number(zone):
 
 def getAllLoadPoints():
     '''getting all points from lutron'''
-    # x, y = keypadTargets["controls"]
-    # print("controls X and Y ", x, " ", y)
-    # pyautogui.moveTo(x, y)
-    # time.sleep(.1)
-    # pyautogui.press("down")
-    # time.sleep(.1)
-    # pyautogui.press("enter")
-    # time.sleep(.5)
+    x, y = keypadTargets["controls"]
+    pyautogui.moveTo(x, y)
+    time.sleep(.1)
+    pyautogui.press("down")
+    time.sleep(.1)
+    pyautogui.press("enter")
+    time.sleep(.5)
 
-    print("Capturing screen...")
+
     screenshot = ImageGrab.grab()
-    print("Running OCR...")
     data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
-    # print(data)
+
     found = {}
     for i in range(len(data['text'])):
         word = data['text'][i].strip()
@@ -615,7 +686,33 @@ def getAllLoadPoints():
         if label in found:
             loadsTargets[label] = found[label]
 
-    print("found: ", found)
+    if loadsTargets["Next"] == (0,0):
+        x, y = loadsTargets["Place:"]
+        pyautogui.moveTo(x, y)
+        time.sleep(.1)
+        pyautogui.click()
+        time.sleep(.3)
+
+
+        screenshot = ImageGrab.grab()
+
+        data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+
+        found = {}
+        for i in range(len(data['text'])):
+            word = data['text'][i].strip()
+            if not word:
+                continue
+            for label in loadsTargets.keys():
+                if label == word:
+                    x = data['left'][i] + data['width'][i] // 2
+                    y = data['top'][i] + data['height'][i] // 2
+                    found[label] = (x, y)
+
+        # Update loadsTargets
+        for label in loadsTargets:
+            if label in found:
+                loadsTargets[label] = found[label]
 
 def loadChecker():
     '''Checks to ensure that there are no duplicate zone names in same room'''
@@ -638,7 +735,7 @@ def loadChecker():
             if name not in name_count:
                 name_count[name] = 1
             else:
-                new_name = f"{name}_{name_count[name]}"
+                new_name = f"{name} {name_count[name]}"
                 print(f"Renaming duplicate in Room {room_number}: '{name}' → '{new_name}'")
                 zone_data[zone]["zone_name"] = new_name
                 name_count[name] += 1
@@ -649,31 +746,36 @@ def insertLoads():
     time2 = .5
     # clicking the place
     x, y = loadsTargets["Place:"]
-    print("Place X and Y ", x, " ", y)
     pyautogui.moveTo(x, y)
     time.sleep(time1)
     pyautogui.click()
     time.sleep(time1)
     pyautogui.press("down")
     time.sleep(time1)
+    def normalize(text):
+        # Lowercase, remove hyphens and all non-alphanumeric except underscore
+        return re.sub(r'[^a-z0-9_]', '', text.lower().replace("-", ""))
 
-    def findingKetra(loadNum):
-        print("Capturing screen...")
+    def findingKetra(loadTag, retry = 0):
+        time.sleep(1)
         screenshot = ImageGrab.grab()
-        print("Running OCR...")
-        data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
-        # print(data)
-        found = {}
 
-        for i in range(len(data['text'])):
-            word = data['text'][i].strip()
-            if not word:
-                continue
-            if loadNum == word:
-                x = data['left'][i] + data['width'][i] // 2
-                y = data['top'][i] + data['height'][i] // 2
-                break
-        return x,y
+        data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+        x = y = 0
+        words = data['text']
+        norm_tag = normalize(loadTag)
+        for i in range(len(words)):
+            for j in range(1, 4):  # try 1- to 3-word combinations
+                phrase = " ".join(words[i:i + j])
+                if normalize(phrase) == norm_tag:
+                    x = data['left'][i] + data['width'][i] // 2
+                    y = data['top'][i] + data['height'][i] // 2
+                    return x, y
+
+        print("❌ Ketra Load not found:", loadTag)
+        if retry < 3:
+            return findingKetra(loadTag, retry + 1)
+        return 0, 0
 
     def enter_text(text):
         pyperclip.copy(text)  # Copy to clipboard
@@ -682,7 +784,6 @@ def insertLoads():
         time.sleep(time2)
         pyautogui.hotkey('ctrl', 'a')
         time.sleep(time2)
-        print("entering ", text)
         pyautogui.hotkey('ctrl', 'v')
         time.sleep(time2)
         pyautogui.press("tab")
@@ -690,19 +791,25 @@ def insertLoads():
 
     def enterFixture(fixture):
         """entering in fixture"""
-        print("entering fixture ", fixture)
         pyautogui.write(fixture, interval=0.1)
         time.sleep(time2)
         pyautogui.press("tab")
 
-    def get_current_room_number():
+    def get_current_room_number(room_number = 0):
         time.sleep(time2)
         pyautogui.press('f2')
         time.sleep(0.2)
         pyautogui.hotkey('ctrl', 'a')
+        time.sleep(0.1)
         pyautogui.hotkey('ctrl', 'c')
         time.sleep(0.2)
         room_text = pyperclip.paste().strip()
+        global last_checked_room
+        if last_checked_room != room_text:
+            last_checked_room = room_text
+        else:
+            goToRoom(str(room_number))
+            return room_number
         if room_text:
             parts = room_text.split()
             if parts[-1].isdigit():
@@ -717,7 +824,7 @@ def insertLoads():
     current_room_number = get_current_room_number()
     pyautogui.press('enter')
     if loadsTargets["Add"] == (0,0):
-        print("Error: 'keypad' target not defined in keypadTargets.")
+        print("Error: 'add' target not defined in LoadTargets.")
         return
 
     for load_num in sorted(zone_data.keys()):
@@ -727,42 +834,43 @@ def insertLoads():
             time2 = .7
         elif room_number == -1:
             x, y = loadsTargets["Next"]
+            if x == 0 or y == 0:
+                x,y = keypadTargets["Next"]
+                if x != 0 or y != 0:
+                    loadsTargets["Next"] = (x,y)
             pyautogui.moveTo(x, y)
             time.sleep(time1)
             pyautogui.click()
             time.sleep(time1)
             pyautogui.press('up')
             time.sleep(time1)
-            current_room_number = get_current_room_number()
+            current_room_number = get_current_room_number(room_number)
             pyautogui.press('enter')
-        elif room_number == 102:
-            exit(1)
 
-        print(f"Inserting light '{zone_data[load_num]}' for Room {room_number} ({load_num})")
         while room_number != current_room_number:
             # checkingLoads(room_number)
             x, y = loadsTargets["Next"]
-            print("Next Room X and Y ", x, " ", y)
-            print("room and current ", room_number, " ", current_room_number )
+            if x == 0 or y == 0:
+                x,y = keypadTargets["Next"]
+                if x != 0 or y != 0:
+                    loadsTargets["Next"] = (x,y)
             pyautogui.moveTo(x, y)
             time.sleep(time1)
             pyautogui.click()
             time.sleep(time1)
             pyautogui.press('up')
             time.sleep(time1)
-            current_room_number = get_current_room_number()
+            current_room_number = get_current_room_number(room_number)
             pyautogui.press('enter')
 
 
         x, y = loadsTargets["Add"]
-        print("Add X and Y ", x, " ", y)
         pyautogui.moveTo(x, y)
         time.sleep(time2)
         pyautogui.click()
         time.sleep(time2)
         if zone_data[load_num]["Ketra"]:
             '''if light is ketra'''
-            print("Ketra Light")
             pyautogui.press("left")
             enter_text(zone_data[load_num]["zone_name"])
             pyautogui.press("right")
@@ -782,38 +890,32 @@ def insertLoads():
             pyautogui.press("enter")
             time.sleep(.2)
             #getting ketra loadNum
-            x,y = findingKetra(loadTag)
+            x,y = (0,0)
+            x,y = findingKetra(zone_data[load_num]["zone_name"])
+            if x == 0 or y == 0:
+                continue
             pyautogui.moveTo(x, y)
             pyautogui.click()
-            time.sleep(.2)
-            pyautogui.press("left")
-            time.sleep(.2)
-            pyautogui.press("left")
-            time.sleep(.2)
-            pyautogui.press("left")
             time.sleep(.2)
             pyautogui.press("enter")
             time.sleep(.2)
             # This is where I am and I need to enter the rest of the ketra fixtures here
-            print("Number of lights ", zone_data[load_num]["fixtures"])
+            tagCounter = 2
+            current_fixture = 1
             for fixture_entry in zone_data[load_num]["fixtures"]:
                 fixture = fixture_entry["fixture"]
                 count = fixture_entry["count"]
-                print("Fixture ", fixture)
-                print("count ", count)
-                intial = 1
-                if fixture_entry == zone_data[load_num]["fixtures"][0]:
-                    print("skip first")
-                    intial = 2
-                print(f"entering from {intial} -> {count}")
-                for numOfEachFixtures in range(intial,count+1):
+                if current_fixture == 1:
+                    count -= 1
+                    current_fixture += 1
+                for numOfEachFixtures in range(count):
                     enter_text(zone_data[load_num]["zone_name"])
                     time.sleep(.5)
                     enterFixture(fixture)
                     time.sleep(.2)
                     pyautogui.press("right")
                     time.sleep(.2)
-                    loadTag = load_num + "-" + str(numOfEachFixtures)
+                    loadTag = (f"{load_num}-{tagCounter}")
                     enter_text(loadTag)
                     time.sleep(.2)
                     pyautogui.press("left")
@@ -826,6 +928,7 @@ def insertLoads():
                     time.sleep(.2)
                     pyautogui.press("enter")
                     time.sleep(.2)
+                    tagCounter += 1
 
 
         else:
@@ -834,10 +937,12 @@ def insertLoads():
             enterFixture(zone_data[load_num]["fixtures"][0]["fixture"])
             enter_text(zone_data[load_num]["fixtures"][0]["count"])
             enter_text(load_num)
-            if zone_data[load_num]["fixtures"][0]["fixture"] != "EH" or zone_data[load_num]["fixtures"][0]["fixture"] != "Fan":
+            if zone_data[load_num]["fixtures"][0]["fixture"] != "EH" and zone_data[load_num]["fixtures"][0]["fixture"] != "Fan":
                 time.sleep(time1)
                 pyautogui.write("y")
                 pyautogui.press("enter")
+
+    print("All loads inserted.")
 
 def insertFixtureTypes():
     x, y = loadsTargets["Edit Fixture Types"]
@@ -847,7 +952,6 @@ def insertFixtureTypes():
     pyautogui.click()
     time.sleep(.5)
 
-    print("Taking screenshot...")
     screenshot = ImageGrab.grab()
     # Run OCR
     found ={}
@@ -958,11 +1062,9 @@ def updateLutron(new):
 
 def getAllShadePoints():
     '''getting equipment points'''
-    print("Capturing screen...")
-    screenshot = ImageGrab.grab()
-    print("Running OCR...")
-    data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
 
+    screenshot = ImageGrab.grab()
+    data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
     found = {}
 
     for i in range(len(data['text']) - 2):
@@ -999,7 +1101,6 @@ def insertShades():
     '''inserting the repeaters into the equipments page'''
     time.sleep(1)
     x, y = keypadTargets["controls"]
-    print("controls X and Y ", x, " ", y)
     pyautogui.moveTo(x, y)
     time.sleep(.1)
     pyautogui.press("down")
@@ -1008,13 +1109,21 @@ def insertShades():
     time.sleep(.5)
     getAllShadePoints()
     x, y = shadeTargets["Place:"]
-    print("Place X and Y ", x, " ", y)
     pyautogui.moveTo(x, y)
     time.sleep(.2)
     pyautogui.click()
     time.sleep(.2)
-    pyautogui.press("down")
-    time.sleep(.2)
+    x, y = shadeTargets["Next"]
+    if x == 0 or y == 0:
+        x,y = keypadTargets["Next"]
+        if x != 0 or y != 0:
+            shadeTargets["Next"] = (x,y)
+    pyautogui.moveTo(x, y)
+    time.sleep(.1)
+    pyautogui.click()
+    time.sleep(.1)
+    pyautogui.press("up")
+    time.sleep(.1)
 
     def enter_text(text):
         pyperclip.copy(text)  # Copy to clipboard
@@ -1027,14 +1136,21 @@ def insertShades():
         pyautogui.press("enter")
         time.sleep(0.3)
 
-    def get_current_room_number():
+    def get_current_room_number(room_number = 0):
         time.sleep(1)
         pyautogui.press('f2')
-        time.sleep(0.2)
+        time.sleep(0.1)
         pyautogui.hotkey('ctrl', 'a')
+        time.sleep(0.1)
         pyautogui.hotkey('ctrl', 'c')
-        time.sleep(0.2)
+        time.sleep(0.1)
         room_text = pyperclip.paste().strip()
+        global last_checked_room
+        if last_checked_room != room_text:
+            last_checked_room = room_text
+        else:
+            goToRoom(str(room_number))
+            return room_number
         if room_text:
             parts = room_text.split()
             if parts[-1].isdigit():
@@ -1071,7 +1187,7 @@ def insertShades():
             time.sleep(.2)
             pyautogui.press('up')
             time.sleep(.2)
-            current_room_number = get_current_room_number()
+            current_room_number = get_current_room_number(room_number)
             pyautogui.press('enter')
 
         x, y = shadeTargets["Add shade group"]
@@ -1096,11 +1212,12 @@ def insertShades():
             if int(cur_room[1]) == room_number:
                 enter_text(shades)
 
+    print("All Shades inserted.")
+
 def gettingAllEquipmentPoints():
     '''getting equipment points'''
     time.sleep(1)
     x, y = keypadTargets["controls"]
-    print("controls X and Y ", x, " ", y)
     pyautogui.moveTo(x, y)
     time.sleep(.1)
     pyautogui.press("down")
@@ -1108,29 +1225,11 @@ def gettingAllEquipmentPoints():
     pyautogui.press("enter")
     time.sleep(.5)
 
-    print("Capturing screen...")
+
     screenshot = ImageGrab.grab()
-    print("Running OCR...")
     data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
     found = {}
 
-    for i in range(len(data['text']) - 1):
-        w1, w2 = data['text'][i:i+2]
-        phrase = f"{w1.strip()} {w2.strip()}"
-        if phrase == "10 w/TBs":
-            x = data['left'][i] + data['width'][i] // 2
-            y = data['top'][i] + data['height'][i] // 2
-            x -= 35
-            y -= 115
-            found["10 w/TBs"] = (x, y)
-
-        if phrase == "8 w/TBs":
-            x = data['left'][i] + data['width'][i] // 2
-            y = data['top'][i] + data['height'][i] // 2
-            x -= 35
-            y -= 115
-            found["8 w/TBs"] = (x, y)
-    # Second pass for single-word labels
     for i in range(len(data['text'])):
         word = data['text'][i].strip()
         if not word:
@@ -1139,10 +1238,45 @@ def gettingAllEquipmentPoints():
             if label == word:
                 x = data['left'][i] + data['width'][i] // 2
                 y = data['top'][i] + data['height'][i] // 2
-                if label == "Smart":
-                    x -= 35
-                    y -= 115
                 found[label] = (x, y)
+
+    if found["Panels"] != (0,0):
+        x,y = found["Panels"]
+        pyautogui.moveTo(x, y)
+        time.sleep(1)
+        pyautogui.click()
+        time.sleep(1)
+        screenshot = ImageGrab.grab()
+        data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+        for i in range(len(data['text']) - 1):
+            w1, w2 = data['text'][i:i+2]
+            phrase = f"{w1.strip()} {w2.strip()}"
+            if phrase == "10 w/TBs":
+                x = data['left'][i] + data['width'][i] // 2
+                y = data['top'][i] + data['height'][i] // 2
+                x -= 35
+                y -= 115
+                found["10 w/TBs"] = (x, y)
+
+            if phrase == "8 w/TBs":
+                x = data['left'][i] + data['width'][i] // 2
+                y = data['top'][i] + data['height'][i] // 2
+                x -= 35
+                y -= 115
+                found["8 w/TBs"] = (x, y)
+        # Second pass for single-word labels
+        for i in range(len(data['text'])):
+            word = data['text'][i].strip()
+            if not word:
+                continue
+            for label in equipmentTargets.keys():
+                if label == word:
+                    x = data['left'][i] + data['width'][i] // 2
+                    y = data['top'][i] + data['height'][i] // 2
+                    if label == "Smart":
+                        x -= 35
+                        y -= 115
+                    found[label] = (x, y)
     # print("found: ", found)
     if found["Devices"] != (0,0):
         x,y = found["Devices"]
@@ -1151,7 +1285,7 @@ def gettingAllEquipmentPoints():
         pyautogui.click()
         time.sleep(1)
         screenshot = ImageGrab.grab()
-        print("Running OCR...")
+
         data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
         for i in range(len(data['text'])):
             word = data['text'][i].strip()
@@ -1170,19 +1304,14 @@ def gettingAllEquipmentPoints():
                     found[label] = (x, y)
 
 
-
     # Update loadsTargets
     for label in equipmentTargets:
         if label in found:
             equipmentTargets[label] = found[label]
 
-    print("found: ", found)
-
 def insertEquipment():
     '''inserting the repeaters into the equipments page'''
-
     x, y = equipmentTargets["Place:"]
-    print("Place X and Y ", x, " ", y)
     pyautogui.moveTo(x, y)
     time.sleep(.2)
     pyautogui.click()
@@ -1192,17 +1321,25 @@ def insertEquipment():
 
     def enter_text(text):
         pyperclip.copy(text)  # Copy to clipboard
+        time.sleep(0.1)
         pyautogui.hotkey('ctrl', 'v')  # Paste from clipboard
         time.sleep(0.3)
 
-    def get_current_room_number():
+    def get_current_room_number(room_number = 0):
         time.sleep(1)
         pyautogui.press('f2')
         time.sleep(0.2)
         pyautogui.hotkey('ctrl', 'a')
+        time.sleep(0.1)
         pyautogui.hotkey('ctrl', 'c')
         time.sleep(0.2)
         room_text = pyperclip.paste().strip()
+        global last_checked_room
+        if last_checked_room != room_text:
+            last_checked_room = room_text
+        else:
+            goToRoom(str(room_number))
+            return room_number
         if room_text:
             parts = room_text.split()
             if parts[-1].isdigit():
@@ -1236,26 +1373,33 @@ def insertEquipment():
 
         if current_room_number not in room_data:
             x, y = equipmentTargets["Next"]
+            if x == 0 or y == 0:
+                x,y = keypadTargets["Next"]
+                if x != 0 or y != 0:
+                    shadeTargets["Next"] = (x,y)
             pyautogui.moveTo(x, y)
             time.sleep(.2)
             pyautogui.click()
             time.sleep(.2)
             pyautogui.press('up')
             time.sleep(.2)
-            current_room_number = get_current_room_number()
+            current_room_number = get_current_room_number(room_number)
             pyautogui.press('enter')
 
-        print(f"Inserting '{device_id}' in Room {room_number})")
         while room_number != current_room_number:
             # checkingLoads(room_number)
             x, y = equipmentTargets["Next"]
+            if x == 0 or y == 0:
+                x,y = keypadTargets["Next"]
+                if x != 0 or y != 0:
+                    shadeTargets["Next"] = (x,y)
             pyautogui.moveTo(x, y)
             time.sleep(.2)
             pyautogui.click()
             time.sleep(.2)
             pyautogui.press('up')
             time.sleep(.2)
-            current_room_number = get_current_room_number()
+            current_room_number = get_current_room_number(room_number)
             pyautogui.press('enter')
 
         # Insert equipment
@@ -1265,7 +1409,6 @@ def insertEquipment():
             pyautogui.click()
             time.sleep(.3)
             x, y = equipmentTargets["Hybrid"]
-            print(f"Inserting '{device_id}' in Room {room_number}")
             x += 35
             pyautogui.moveTo(x, y)
             pyautogui.click()
@@ -1280,7 +1423,6 @@ def insertEquipment():
             pyautogui.click()
             time.sleep(.3)
             x, y = equipmentTargets["Clear"]
-            print(f"Inserting '{device_id}' in Room {room_number}")
             x += 35
             pyautogui.moveTo(x, y)
             pyautogui.click()
@@ -1295,7 +1437,6 @@ def insertEquipment():
             pyautogui.click()
             time.sleep(.3)
             x, y = equipmentTargets["Smart"]
-            print(f"Inserting '{device_id}' in Room {room_number}")
             x += 35
             pyautogui.moveTo(x, y)
             pyautogui.click()
@@ -1304,7 +1445,8 @@ def insertEquipment():
             pyautogui.moveTo(x, y)
             time.sleep(.3)
             pyautogui.click()
-            time.sleep(.3)
+            time.sleep(.5)
+            device_id = "Power Supply " + device_id
 
         enter_text(device_id)
         pyautogui.press('enter')
@@ -1321,14 +1463,13 @@ def prompt_file_selection():
 if __name__ == "__main__":
     # Example usage
     ketraLights = ["AK", "AL"]
-    # print("Select the original xls")
+    print("Select the original xls")
     # input()
-    # file_path = prompt_file_selection()
-    # if file_path:
-    #     print("Selected file:", file_path)
-    # else:
-    #     print("No file selected.")
-    # file_path = prompt_file_selection()
+    file_path = prompt_file_selection()
+    if file_path:
+        print("Selected file:", file_path)
+    else:
+        print("No file selected.")
 
     load_excel_file(file_path, ketraLights)
 
@@ -1339,16 +1480,16 @@ if __name__ == "__main__":
         '''This is for creating a new program'''
         time.sleep(2)
         getAllKeypadPoints()
-        # insert_rooms()
-        # getRoomLocations()
-        # keypadChecker()
-        # insert_keypads()
-        # loadChecker()
-        # getAllLoadPoints()
-        # insertLoads()
-        # insertShades()
-        # gettingAllEquipmentPoints()
-        # insertEquipment()
+        insert_rooms()
+        getRoomLocations()
+        keypadChecker()
+        insert_keypads()
+        loadChecker()
+        getAllLoadPoints()
+        insertLoads()
+        insertShades()
+        gettingAllEquipmentPoints()
+        insertEquipment()
 
 
     elif choice == '2':
@@ -1358,15 +1499,3 @@ if __name__ == "__main__":
     else:
         print("Invalid choice. Exiting.")
         sys.exit(1)
-
-# NEED TO MOVE TO KEYPADS
-        # elif parts[0] == "MS" or parts[0] == "OS":
-        #     x, y = equipmentTargets["Devices"]
-        #     pyautogui.moveTo(x, y)
-        #     pyautogui.click()
-        #     time.sleep(1)
-        #     x, y = equipmentTargets["Hybrid"]
-        #     print(f"Inserting '{device_id}' in Room {room_number}")
-        #     pyautogui.moveTo(x, y)
-        #     pyautogui.click()
-        #     time.sleep(1)
